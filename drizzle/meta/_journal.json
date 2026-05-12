@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1778197577521,
+      "tag": "0000_stormy_puck",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1778197739080,
+      "tag": "0001_bouncy_giant_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1778201761973,
+      "tag": "0002_perfect_paibok",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1778282873720,
+      "tag": "0003_wide_thunderbolts",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1778612145931,
+      "tag": "0004_careful_virginia_dare",
+      "breakpoints": true
+    }
+  ]
+}

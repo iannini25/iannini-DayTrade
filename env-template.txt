@@ -1,0 +1,34 @@
+# ============================================================
+# Iannini Day Trade Workspace — Variáveis de Ambiente
+# Renomeie para .env e preencha os valores antes de iniciar.
+# Nunca commite o .env real para o git (já está no .gitignore).
+# ============================================================
+
+# ── Banco de Dados MySQL ────────────────────────────────────
+# Formato: mysql://USUARIO:SENHA@HOST:PORTA/NOME_DO_BANCO
+DATABASE_URL=mysql://iannini_user:SUA_SENHA@localhost:3306/iannini_daytrade
+
+# ── Segurança / Sessão ──────────────────────────────────────
+# JWT_SECRET — usado para assinar cookies de sessão (mínimo 32 chars).
+# Gere com:
+#   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+JWT_SECRET=GERE_UMA_CHAVE_SEGURA_MINIMO_32_CARACTERES
+
+# ENCRYPTION_KEY — chave AES-256-GCM para criptografar segredos do Banco Inter
+# armazenados no banco de dados. DEVE ter exatamente 64 caracteres hex (32 bytes).
+# Gere com:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# IMPORTANTE: se essa chave for trocada depois, todas as credenciais Inter
+# salvas terão que ser reinseridas (não há rotação automática).
+ENCRYPTION_KEY=GERE_UMA_CHAVE_HEX_DE_64_CARACTERES
+
+# ── IA / LLM (OpenAI ou compatível) — OPCIONAL ─────────────
+# Se vazio, a área de Análise IA fica desabilitada e exibe aviso amigável.
+# Obtenha em: https://platform.openai.com/api-keys
+OPENAI_API_KEY=
+OPENAI_API_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+
+# ── Servidor ────────────────────────────────────────────────
+NODE_ENV=production
+PORT=3000
