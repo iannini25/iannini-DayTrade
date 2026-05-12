@@ -13,6 +13,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
 
   const { data: user, isLoading: checkingAuth } = trpc.auth.me.useQuery(undefined, {
     retry: false,
@@ -20,7 +21,11 @@ export default function Login() {
   });
 
   const loginMutation = trpc.auth.login.useMutation({
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Refetch auth.me ANTES de navegar para evitar AuthGuard ver cache stale (null)
+      // e chutar o usuário de volta para /login.
+      await utils.auth.me.invalidate();
+      await utils.auth.me.refetch();
       setLocation("/workspace");
     },
     onError: (err: { message?: string }) => {
