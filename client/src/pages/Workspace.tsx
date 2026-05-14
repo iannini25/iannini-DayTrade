@@ -9,8 +9,9 @@ import {
   TrendingUp, Activity, BarChart2,
   Settings, LogOut, Calculator, Calendar, BookOpen,
   ChevronUp, ChevronDown, Wifi, WifiOff, Menu, X, LayoutDashboard,
-  Pause, Play, Target
+  Pause, Play, Target, Smartphone, Brain
 } from "lucide-react";
+import { setPreferredLayout, getRouteForLayout } from "@/lib/layoutPreference";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -307,6 +308,33 @@ export default function Workspace() {
               </span>
             </div>
           )}
+
+          {/* Trocar para modo Smartphone */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              setPreferredLayout("mobile");
+              setLocation(getRouteForLayout("mobile"));
+            }}
+            title="Trocar para modo Smartphone"
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span className="hidden xl:block">Mobile</span>
+          </Button>
+
+          {/* IA Operacional */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setLocation("/ai-trading")}
+            title="IA Operacional"
+          >
+            <Brain className="w-3.5 h-3.5" />
+            <span className="hidden xl:block">IA Operacional</span>
+          </Button>
 
           {/* Kill Switch — Pausar / Retomar operações */}
           <Button

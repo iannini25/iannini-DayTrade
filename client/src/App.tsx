@@ -14,6 +14,7 @@ import Predictions from "./pages/Predictions";
 import MarketOverview from "./pages/MarketOverview";
 import InterIntegration from "./pages/InterIntegration";
 import UserSettings from "./pages/UserSettings";
+import AiTrading from "./pages/AiTrading";
 import AuthGuard from "./components/AuthGuard";
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect } from "react";
@@ -25,6 +26,7 @@ import {
 
 const NAV_ITEMS = [
   { path: "/workspace",         label: "Workspace",     icon: LayoutDashboard, group: "principal" },
+  { path: "/ai-trading",        label: "IA Operacional", icon: Activity,       group: "principal" },
   { path: "/predictions",       label: "Análise IA",    icon: Brain,           group: "principal" },
   { path: "/market",            label: "Mercado",       icon: Globe,           group: "principal" },
   { path: "/dashboard",         label: "Performance",   icon: BarChart3,       group: "análise" },
@@ -204,6 +206,9 @@ function Router() {
       <Route path="/login"  component={Login} />
       <Route path="/workspace">
         <AuthGuard><AppLayout><Workspace /></AppLayout></AuthGuard>
+      </Route>
+      <Route path="/ai-trading">
+        <AuthGuard><AppLayout><AiTrading /></AppLayout></AuthGuard>
       </Route>
       <Route path="/predictions">
         <AuthGuard><AppLayout><Predictions /></AppLayout></AuthGuard>
