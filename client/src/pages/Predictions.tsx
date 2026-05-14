@@ -161,13 +161,38 @@ function PredictionCard({ prediction, onUpdateStatus }: {
         )}
       </div>
 
+      {/* Estratégia (sempre visível, M3) */}
+      {context.strategyExplanation && (
+        <div className="px-4 pb-3 -mt-1">
+          <div
+            className="rounded-lg border border-border/30 p-3 text-xs"
+            style={{ background: "oklch(0.07 0.01 240)" }}
+          >
+            <p className="text-[10px] font-semibold text-foreground uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+              <Brain className="w-3 h-3" />
+              Estratégia
+              {context.generatedBy && (
+                <Badge variant="outline" className="text-[9px] font-mono ml-auto">
+                  {context.generatedBy === "llm" ? "IA-GPT" :
+                   context.generatedBy === "technical" ? "TÉCNICO" :
+                   "FALLBACK"}
+                </Badge>
+              )}
+            </p>
+            <p className="text-muted-foreground leading-relaxed">
+              {context.strategyExplanation}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Análise expandível */}
       <div className="border-t border-border/30">
         <button
           onClick={() => setExpanded(v => !v)}
           className="w-full px-4 py-2 flex items-center justify-between text-xs text-muted-foreground hover:text-foreground transition-colors"
         >
-          <span>Análise detalhada da IA</span>
+          <span>Ver análise completa</span>
           {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
         </button>
         {expanded && (
@@ -180,6 +205,26 @@ function PredictionCard({ prediction, onUpdateStatus }: {
                   {context.keyLevels.map((level: string, i: number) => (
                     <Badge key={i} variant="outline" className="text-[10px] font-trading">{level}</Badge>
                   ))}
+                </div>
+              </div>
+            )}
+            {context.indicators && (
+              <div className="mt-3 grid grid-cols-4 gap-2 text-[10px]">
+                <div>
+                  <p className="text-muted-foreground">EMA9</p>
+                  <p className="font-trading font-semibold text-foreground">{Number(context.indicators.ema9).toFixed(0)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">EMA21</p>
+                  <p className="font-trading font-semibold text-foreground">{Number(context.indicators.ema21).toFixed(0)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">VWAP</p>
+                  <p className="font-trading font-semibold text-foreground">{Number(context.indicators.vwap).toFixed(0)}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">RSI</p>
+                  <p className="font-trading font-semibold text-foreground">{Number(context.indicators.rsi).toFixed(0)}</p>
                 </div>
               </div>
             )}

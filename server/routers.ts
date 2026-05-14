@@ -11,6 +11,12 @@ import {
   type TechnicalSignal,
 } from "./services/technicalAnalysis";
 import { ENV } from "./config/env";
+import {
+  computeStats,
+  getRecentPredictions,
+  formatStatsForPrompt,
+} from "./services/predictionStats";
+import { fetchMarketNews, formatNewsForPrompt } from "./services/newsRss";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 import { getStockChart, extractQuoteMeta } from "./yahooFinance";
 import { invokeLLM } from "./services/llm";
@@ -38,8 +44,10 @@ async function tryLLMSignal(args: {
   candles: ReturnType<typeof extractCandles>;
   ibovMeta: any;
   params: { stopLossPoints: number; takeProfitPoints: number; preferredContracts: number; riskProfile: "conservative" | "moderate" | "aggressive" };
+  historyContext: string;
+  newsContext: string;
 }): Promise<TechnicalSignal | null> {
-  const { symbol, candles, ibovMeta, params } = args;
+  const { symbol, candles, ibovMeta, params, historyContext, newsContext } = args;
 
   // Constrói contexto resumido para o LLM
   const lastClose = candles[candles.length - 1]?.close ?? 0;
@@ -65,6 +73,8 @@ async function tryLLMSignal(args: {
 
   const systemPrompt =
     "Você é um especialista em Day Trade do Mini Índice (WIN) na B3. " +
+    "Use o HISTÓRICO do trader para calibrar sua confiança e o tipo de sinal. " +
+    "Use as NOTÍCIAS para identificar catalisadores macro que possam afetar o intraday. " +
     "Responda SEMPRE em JSON válido com a estrutura exata especificada.";
 
   const userPrompt = `Analise o mercado e gere um sinal para ${symbol}.
@@ -78,6 +88,10 @@ ${isLunchHour ? "⚠️ Almoço — liquidez reduzida." : ""}
 ${isClosingHour ? "⚠️ Pré-fechamento — risco de reversão." : ""}
 
 PERFIL: ${params.riskProfile}. Stop ${params.stopLossPoints}pts. Gain ${params.takeProfitPoints}pts. ${params.preferredContracts} contratos.
+
+${historyContext}
+
+${newsContext}
 
 Responda APENAS com o JSON especificado no schema.`;
 
@@ -290,6 +304,12 @@ export const appRouter = router({
       });
     }),
 
+    // Notícias do mercado brasileiro via RSS do Google News (cache 10min)
+    getNews: publicProcedure.query(async () => {
+      const items = await fetchMarketNews();
+      return { items: items.slice(0, 10) };
+    }),
+
     // Contrato WIN ativo (resolvido dinamicamente por data)
     getActiveWinContract: publicProcedure.query(() => {
       const c = resolveActiveWinContract();
@@ -379,11 +399,21 @@ export const appRouter = router({
         // ─── CAMADA 1: LLM (se OPENAI_API_KEY estiver setada E houver dados) ───
         if (ENV.openaiApiKey && hasMarketData) {
           try {
+            // Memória 30d: histórico do próprio usuário para calibrar a IA
+            const history = await getRecentPredictions(ctx.user.id, 30);
+            const historyContext = formatStatsForPrompt(computeStats(history));
+
+            // News RSS: catalisadores macro recentes (Brasil)
+            const news = await fetchMarketNews().catch(() => []);
+            const newsContext = formatNewsForPrompt(news);
+
             const llmSignal = await tryLLMSignal({
               symbol: displaySymbol,
               candles,
               ibovMeta,
               params,
+              historyContext,
+              newsContext,
             });
             if (llmSignal) {
               return await persistAndReturn(ctx.user.id, displaySymbol, llmSignal, "llm");
