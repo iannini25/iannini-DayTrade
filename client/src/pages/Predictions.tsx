@@ -233,14 +233,16 @@ export default function Predictions() {
     setIsGenerating(true);
     try {
       const result = await generateMutation.mutateAsync({ symbol: "WIN", forceRefresh: true });
-      if (result.success) {
-        toast.success("Nova análise gerada com sucesso!", { description: "A IA analisou o mercado e gerou um sinal." });
-        refetch();
-      } else {
-        toast.error("Falha ao gerar análise", { description: result.error });
-      }
-    } catch {
-      toast.error("Erro ao conectar com a IA");
+      const sourceLabel =
+        result.generatedBy === "llm"
+          ? "Análise com IA (GPT)"
+          : result.generatedBy === "technical"
+            ? "Análise técnica determinística"
+            : "Fallback (sem dados de mercado)";
+      toast.success("Nova análise gerada", { description: sourceLabel });
+      refetch();
+    } catch (err: any) {
+      toast.error("Erro ao gerar análise", { description: err?.message ?? "Tente novamente em alguns segundos." });
     } finally {
       setIsGenerating(false);
     }

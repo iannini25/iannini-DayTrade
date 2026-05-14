@@ -3,6 +3,14 @@ import { COOKIE_NAME, isAuthorizedEmail } from "@shared/const";
 import { getSessionCookieOptions } from "./lib/cookies";
 import { encrypt } from "./lib/crypto";
 import { makeProcedureLimiter } from "./lib/rateLimit";
+import { resolveActiveWinContract } from "./lib/winContract";
+import {
+  extractCandles,
+  generateTechnicalSignal,
+  generateFallbackSignal,
+  type TechnicalSignal,
+} from "./services/technicalAnalysis";
+import { ENV } from "./config/env";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 import { getStockChart, extractQuoteMeta } from "./yahooFinance";
 import { invokeLLM } from "./services/llm";
@@ -22,6 +30,152 @@ import {
 } from "./db";
 
 const loginRateCheck = makeProcedureLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
+
+// ─── Helpers para predictions.generate ────────────────────────────────────────
+
+async function tryLLMSignal(args: {
+  symbol: string;
+  candles: ReturnType<typeof extractCandles>;
+  ibovMeta: any;
+  params: { stopLossPoints: number; takeProfitPoints: number; preferredContracts: number; riskProfile: "conservative" | "moderate" | "aggressive" };
+}): Promise<TechnicalSignal | null> {
+  const { symbol, candles, ibovMeta, params } = args;
+
+  // Constrói contexto resumido para o LLM
+  const lastClose = candles[candles.length - 1]?.close ?? 0;
+  const prevClose = candles[candles.length - 2]?.close ?? 0;
+  const high = Math.max(...candles.map((c) => c.high));
+  const low = Math.min(...candles.map((c) => c.low));
+  const avgVol = Math.round(
+    candles.slice(-10).reduce((sum, c) => sum + c.volume, 0) / Math.max(1, Math.min(10, candles.length))
+  );
+
+  let marketContext = `${symbol}: Preço ${lastClose.toFixed(0)}, Anterior ${prevClose.toFixed(0)}, Máx ${high.toFixed(0)}, Mín ${low.toFixed(0)}, Volume médio ${avgVol.toLocaleString("pt-BR")}. `;
+  if (ibovMeta?.regularMarketPrice) {
+    marketContext += `Ibovespa: ${ibovMeta.regularMarketPrice.toFixed(0)} pts. `;
+  }
+
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const isOpeningHour = hour === 9 && minute < 30;
+  const isLunchHour = hour >= 12 && hour < 13;
+  const isClosingHour = hour >= 16 && hour < 17;
+
+  const systemPrompt =
+    "Você é um especialista em Day Trade do Mini Índice (WIN) na B3. " +
+    "Responda SEMPRE em JSON válido com a estrutura exata especificada.";
+
+  const userPrompt = `Analise o mercado e gere um sinal para ${symbol}.
+
+CONTEXTO DE MERCADO:
+${marketContext}
+
+HORÁRIO: ${timeStr} (Brasília)
+${isOpeningHour ? "⚠️ Abertura — volatilidade elevada." : ""}
+${isLunchHour ? "⚠️ Almoço — liquidez reduzida." : ""}
+${isClosingHour ? "⚠️ Pré-fechamento — risco de reversão." : ""}
+
+PERFIL: ${params.riskProfile}. Stop ${params.stopLossPoints}pts. Gain ${params.takeProfitPoints}pts. ${params.preferredContracts} contratos.
+
+Responda APENAS com o JSON especificado no schema.`;
+
+  const llmResponse = await invokeLLM({
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "trading_signal",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            signalType: { type: "string", enum: ["buy", "sell", "neutral", "avoid"] },
+            confidence: { type: "integer" },
+            entryZoneLow: { type: "number" },
+            entryZoneHigh: { type: "number" },
+            stopLoss: { type: "number" },
+            takeProfit: { type: "number" },
+            riskLevel: { type: "string", enum: ["low", "medium", "high"] },
+            reasoning: { type: "string" },
+            strategyExplanation: { type: "string" },
+            keyLevels: { type: "array", items: { type: "string" } },
+            marketBias: { type: "string", enum: ["bullish", "bearish", "sideways"] },
+            suggestedContracts: { type: "integer" },
+            validUntil: { type: "string" },
+            warnings: { type: "array", items: { type: "string" } },
+          },
+          required: [
+            "signalType", "confidence", "entryZoneLow", "entryZoneHigh", "stopLoss", "takeProfit",
+            "riskLevel", "reasoning", "strategyExplanation", "keyLevels", "marketBias",
+            "suggestedContracts", "validUntil", "warnings",
+          ],
+          additionalProperties: false,
+        },
+      },
+    },
+  });
+
+  const content = (llmResponse as any)?.choices?.[0]?.message?.content;
+  const parsed = typeof content === "string" ? JSON.parse(content) : content;
+  if (!parsed) return null;
+
+  return {
+    ...parsed,
+    indicators: {
+      ema9: 0,
+      ema21: 0,
+      vwap: 0,
+      rsi: 50,
+      currentPrice: lastClose,
+      high,
+      low,
+    },
+  };
+}
+
+async function persistAndReturn(
+  userId: number,
+  symbol: string,
+  signal: TechnicalSignal,
+  generatedBy: "llm" | "technical" | "fallback"
+) {
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+  const prediction = await insertPrediction({
+    userId,
+    symbol,
+    signalType: signal.signalType,
+    confidence: Math.min(100, Math.max(0, signal.confidence)),
+    entryZoneLow: String(signal.entryZoneLow),
+    entryZoneHigh: String(signal.entryZoneHigh),
+    stopLoss: String(signal.stopLoss),
+    takeProfit: String(signal.takeProfit),
+    reasoning: signal.reasoning,
+    marketContext: JSON.stringify({
+      generatedBy,
+      strategyExplanation: signal.strategyExplanation,
+      keyLevels: signal.keyLevels,
+      marketBias: signal.marketBias,
+      suggestedContracts: signal.suggestedContracts,
+      validUntil: signal.validUntil,
+      warnings: signal.warnings,
+      indicators: signal.indicators,
+    }),
+    riskLevel: signal.riskLevel,
+    expiresAt,
+  });
+
+  return {
+    success: true,
+    generatedBy,
+    prediction: { ...prediction, parsed: signal },
+  };
+}
 
 export const appRouter = router({
   auth: router({
@@ -136,6 +290,21 @@ export const appRouter = router({
       });
     }),
 
+    // Contrato WIN ativo (resolvido dinamicamente por data)
+    getActiveWinContract: publicProcedure.query(() => {
+      const c = resolveActiveWinContract();
+      return {
+        symbol: c.symbol,
+        yahooSymbol: c.yahooSymbol,
+        expiry: c.expiry.toISOString(),
+        expiryMonth: c.expiryMonth,
+        expiryYear: c.expiryYear,
+        monthCode: c.monthCode,
+        daysToExpiry: c.daysToExpiry,
+        nearExpiry: c.nearExpiry,
+      };
+    }),
+
     // Buscar top movers (maiores altas e baixas do dia)
     getTopMovers: publicProcedure.query(async () => {
       const stocks = [
@@ -177,158 +346,64 @@ export const appRouter = router({
         forceRefresh: z.boolean().default(false),
       }))
       .mutation(async ({ ctx, input }) => {
-        // Buscar dados de mercado para contexto
-        let marketContext = "";
+        // Resolver contrato WIN ativo (ex.: WINM26)
+        const activeContract = resolveActiveWinContract();
+        const displaySymbol = input.symbol === "WIN" ? activeContract.symbol : input.symbol;
+
+        // Configurações do usuário
+        const settings = await getUserSettings(ctx.user.id);
+        const params = {
+          stopLossPoints: settings?.stopLossPoints ?? 150,
+          takeProfitPoints: settings?.takeProfitPoints ?? 250,
+          preferredContracts: settings?.preferredContracts ?? 5,
+          riskProfile: (settings?.riskProfile ?? "moderate") as "conservative" | "moderate" | "aggressive",
+        };
+
+        // Tentar buscar dados de mercado
+        let winChart: any = null;
+        let ibovMeta: any = null;
         try {
-          const [winData, ibovData] = await Promise.allSettled([
-            getStockChart({ symbol: "WIN=F", interval: "5m", range: "1d" }),
+          const [winRes, ibovRes] = await Promise.allSettled([
+            getStockChart({ symbol: activeContract.yahooSymbol, interval: "5m", range: "1d" }),
             getStockChart({ symbol: "^BVSP", interval: "1d", range: "5d" }),
           ]);
-
-          if (winData.status === "fulfilled") {
-            const meta = (winData.value as any)?.chart?.result?.[0]?.meta;
-            const quotes = (winData.value as any)?.chart?.result?.[0]?.indicators?.quote?.[0];
-            const closes = quotes?.close?.filter(Boolean) ?? [];
-            const volumes = quotes?.volume?.filter(Boolean) ?? [];
-            const lastClose = closes[closes.length - 1];
-            const prevClose = closes[closes.length - 2];
-            const avgVol = volumes.slice(-10).reduce((a: number, b: number) => a + b, 0) / 10;
-            marketContext += `WIN Futuro: Preço atual ${lastClose?.toFixed(0) ?? "N/A"}, Anterior ${prevClose?.toFixed(0) ?? "N/A"}, `;
-            marketContext += `Máx ${meta?.regularMarketDayHigh?.toFixed(0) ?? "N/A"}, Mín ${meta?.regularMarketDayLow?.toFixed(0) ?? "N/A"}. `;
-            marketContext += `Volume médio (10 candles): ${Math.round(avgVol).toLocaleString("pt-BR")}. `;
-          }
-          if (ibovData.status === "fulfilled") {
-            const meta = (ibovData.value as any)?.chart?.result?.[0]?.meta;
-            const quotes = (ibovData.value as any)?.chart?.result?.[0]?.indicators?.quote?.[0];
-            const closes = quotes?.close?.filter(Boolean) ?? [];
-            const trend5d = closes.length >= 2
-              ? ((closes[closes.length - 1] - closes[0]) / closes[0] * 100).toFixed(2)
-              : "N/A";
-            marketContext += `Ibovespa: ${meta?.regularMarketPrice?.toFixed(0) ?? "N/A"} pts, tendência 5 dias: ${trend5d}%.`;
-          }
+          if (winRes.status === "fulfilled") winChart = winRes.value;
+          if (ibovRes.status === "fulfilled") ibovMeta = ibovRes.value?.chart?.result?.[0]?.meta;
         } catch {
-          marketContext = "Dados de mercado indisponíveis no momento.";
+          /* segue para fallback */
         }
 
-        // Buscar configurações do usuário
-        const settings = await getUserSettings(ctx.user.id);
-        const riskProfile = settings?.riskProfile ?? "moderate";
-        const stopLoss = settings?.stopLossPoints ?? 150;
-        const takeProfit = settings?.takeProfitPoints ?? 250;
-        const contracts = settings?.preferredContracts ?? 5;
+        const candles = winChart ? extractCandles(winChart) : [];
+        const hasMarketData = candles.length >= 21;
 
-        const now = new Date();
-        const hour = now.getHours();
-        const minute = now.getMinutes();
-        const timeStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-        const isOpeningHour = hour === 9 && minute < 30;
-        const isLunchHour = hour >= 12 && hour < 13;
-        const isClosingHour = hour >= 16 && hour < 17;
-
-        const systemPrompt = `Você é um especialista em Day Trade de mercado futuro brasileiro, com 20 anos de experiência operando Mini Índice (WIN) na B3. 
-Você analisa dados técnicos e fundamentalistas para gerar sinais de operação precisos.
-Responda SEMPRE em JSON válido com a estrutura exata especificada. Seja direto, técnico e preciso.`;
-
-        const userPrompt = `Analise o mercado atual e gere um sinal de operação para o ${input.symbol} (Mini Índice Futuro).
-
-CONTEXTO DE MERCADO:
-${marketContext}
-
-HORÁRIO ATUAL: ${timeStr} (Brasília)
-${isOpeningHour ? "⚠️ ATENÇÃO: Abertura de mercado - volatilidade elevada, aguardar estabilização." : ""}
-${isLunchHour ? "⚠️ ATENÇÃO: Horário de almoço - liquidez reduzida, evitar novas entradas." : ""}
-${isClosingHour ? "⚠️ ATENÇÃO: Próximo ao fechamento - risco de reversão, operar com cautela." : ""}
-
-PERFIL DO TRADER:
-- Perfil de risco: ${riskProfile === "conservative" ? "Conservador" : riskProfile === "moderate" ? "Moderado" : "Agressivo"}
-- Stop Loss configurado: ${stopLoss} pontos
-- Take Profit configurado: ${takeProfit} pontos
-- Contratos padrão: ${contracts}
-
-Gere uma análise completa com sinal de operação. Responda APENAS com JSON no formato:
-{
-  "signalType": "buy" | "sell" | "neutral" | "avoid",
-  "confidence": número de 0 a 100,
-  "entryZoneLow": número (preço mínimo da zona de entrada),
-  "entryZoneHigh": número (preço máximo da zona de entrada),
-  "stopLoss": número (preço do stop loss),
-  "takeProfit": número (preço do take profit),
-  "riskLevel": "low" | "medium" | "high",
-  "reasoning": "análise técnica detalhada em português (3-5 parágrafos)",
-  "keyLevels": ["nível 1", "nível 2", "nível 3"],
-  "marketBias": "bullish" | "bearish" | "sideways",
-  "suggestedContracts": número de 1 a ${contracts},
-  "validUntil": "HH:MM (horário de validade do sinal)",
-  "warnings": ["aviso 1", "aviso 2"]
-}`;
-
-        try {
-          const llmResponse = await invokeLLM({
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt },
-            ],
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "trading_signal",
-                strict: true,
-                schema: {
-                  type: "object",
-                  properties: {
-                    signalType: { type: "string", enum: ["buy", "sell", "neutral", "avoid"] },
-                    confidence: { type: "integer" },
-                    entryZoneLow: { type: "number" },
-                    entryZoneHigh: { type: "number" },
-                    stopLoss: { type: "number" },
-                    takeProfit: { type: "number" },
-                    riskLevel: { type: "string", enum: ["low", "medium", "high"] },
-                    reasoning: { type: "string" },
-                    keyLevels: { type: "array", items: { type: "string" } },
-                    marketBias: { type: "string", enum: ["bullish", "bearish", "sideways"] },
-                    suggestedContracts: { type: "integer" },
-                    validUntil: { type: "string" },
-                    warnings: { type: "array", items: { type: "string" } },
-                  },
-                  required: ["signalType", "confidence", "entryZoneLow", "entryZoneHigh", "stopLoss", "takeProfit", "riskLevel", "reasoning", "keyLevels", "marketBias", "suggestedContracts", "validUntil", "warnings"],
-                  additionalProperties: false,
-                },
-              },
-            },
-          });
-
-          const content = (llmResponse as any)?.choices?.[0]?.message?.content;
-          const parsed = typeof content === "string" ? JSON.parse(content) : content;
-
-          // Calcular expiração (1 hora a partir de agora)
-          const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-
-          const prediction = await insertPrediction({
-            userId: ctx.user.id,
-            symbol: input.symbol,
-            signalType: parsed.signalType,
-            confidence: Math.min(100, Math.max(0, parsed.confidence)),
-            entryZoneLow: String(parsed.entryZoneLow),
-            entryZoneHigh: String(parsed.entryZoneHigh),
-            stopLoss: String(parsed.stopLoss),
-            takeProfit: String(parsed.takeProfit),
-            reasoning: parsed.reasoning,
-            marketContext: JSON.stringify({
-              keyLevels: parsed.keyLevels,
-              marketBias: parsed.marketBias,
-              suggestedContracts: parsed.suggestedContracts,
-              validUntil: parsed.validUntil,
-              warnings: parsed.warnings,
-              rawContext: marketContext,
-            }),
-            riskLevel: parsed.riskLevel,
-            expiresAt,
-          });
-
-          return { success: true, prediction: { ...prediction, parsed } };
-        } catch (error) {
-          return { success: false, error: "Falha ao gerar análise. Tente novamente." };
+        // ─── CAMADA 1: LLM (se OPENAI_API_KEY estiver setada E houver dados) ───
+        if (ENV.openaiApiKey && hasMarketData) {
+          try {
+            const llmSignal = await tryLLMSignal({
+              symbol: displaySymbol,
+              candles,
+              ibovMeta,
+              params,
+            });
+            if (llmSignal) {
+              return await persistAndReturn(ctx.user.id, displaySymbol, llmSignal, "llm");
+            }
+          } catch (err) {
+            console.warn("[predictions.generate] LLM failed, falling to technical:", err);
+          }
         }
+
+        // ─── CAMADA 2: Análise técnica determinística ───
+        if (hasMarketData) {
+          const techSignal = generateTechnicalSignal(candles, params);
+          return await persistAndReturn(ctx.user.id, displaySymbol, techSignal, "technical");
+        }
+
+        // ─── CAMADA 3: Fallback baseado em horário ───
+        const fallbackSignal = generateFallbackSignal(new Date(), {
+          preferredContracts: params.preferredContracts,
+        });
+        return await persistAndReturn(ctx.user.id, displaySymbol, fallbackSignal, "fallback");
       }),
 
     list: protectedProcedure

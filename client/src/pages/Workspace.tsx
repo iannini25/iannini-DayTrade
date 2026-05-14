@@ -114,6 +114,12 @@ export default function Workspace() {
     { refetchInterval: 30000, staleTime: 25000 }
   );
 
+  // Contrato WIN ativo (ex.: WINM26) — atualiza só de hora em hora
+  const { data: activeContract } = trpc.market.getActiveWinContract.useQuery(
+    undefined,
+    { staleTime: 60 * 60 * 1000, refetchOnWindowFocus: false }
+  );
+
   const { data: summary } = trpc.performance.getSummary.useQuery(
     undefined,
     { refetchInterval: 60000 }
@@ -259,10 +265,27 @@ export default function Workspace() {
             <span className="text-sm font-semibold tracking-tight hidden sm:block">Iannini Day Trade</span>
           </div>
 
-          {/* Preço WIN */}
+          {/* Preço WIN com contrato ativo */}
           {currentPrice > 0 && (
             <div className="flex items-center gap-2 ml-3 pl-3 border-l border-border">
-              <span className="text-xs text-muted-foreground font-medium">WIN</span>
+              <span
+                className="text-xs font-medium flex items-center gap-1"
+                title={
+                  activeContract
+                    ? `Vencimento: ${new Date(activeContract.expiry).toLocaleDateString("pt-BR")} (${activeContract.daysToExpiry} dia${activeContract.daysToExpiry !== 1 ? "s" : ""})`
+                    : ""
+                }
+              >
+                <span className={activeContract?.nearExpiry ? "text-amber-400" : "text-muted-foreground"}>
+                  {activeContract?.symbol ?? "WIN"}
+                </span>
+                {activeContract && (
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full ${activeContract.nearExpiry ? "bg-amber-400 animate-pulse" : "bg-buy"}`}
+                    aria-hidden="true"
+                  />
+                )}
+              </span>
               <span className="font-trading text-sm font-semibold text-foreground">
                 {currentPrice.toLocaleString("pt-BR")}
               </span>
