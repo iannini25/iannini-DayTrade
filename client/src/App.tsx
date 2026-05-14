@@ -15,6 +15,7 @@ import MarketOverview from "./pages/MarketOverview";
 import InterIntegration from "./pages/InterIntegration";
 import UserSettings from "./pages/UserSettings";
 import AiTrading from "./pages/AiTrading";
+import MobilePage from "./pages/Mobile";
 import AuthGuard from "./components/AuthGuard";
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect } from "react";
@@ -206,6 +207,9 @@ function Router() {
       <Route path="/login"  component={Login} />
       <Route path="/workspace">
         <AuthGuard><AppLayout><Workspace /></AppLayout></AuthGuard>
+      </Route>
+      <Route path="/mobile">
+        <AuthGuard><MobilePage /></AuthGuard>
       </Route>
       <Route path="/ai-trading">
         <AuthGuard><AppLayout><AiTrading /></AppLayout></AuthGuard>

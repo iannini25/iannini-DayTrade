@@ -14,10 +14,20 @@ import {
   type Time,
 } from "lightweight-charts";
 
+export interface PriceLineSpec {
+  price: number;
+  color: string;
+  title?: string;
+  lineStyle?: 0 | 1 | 2 | 3 | 4; // 0=Solid, 1=Dotted, 2=Dashed, 3=LargeDashed, 4=SparseDotted
+  lineWidth?: 1 | 2 | 3 | 4;
+}
+
 interface CandlestickChartProps {
   marketData: unknown;
   onVwapCrossUp?: () => void;
   onVwapCrossDown?: () => void;
+  /** Linhas horizontais extras (ex.: entry/stop/gain da predição da IA). */
+  priceLines?: PriceLineSpec[];
 }
 
 function calcEMA(data: number[], period: number): number[] {
@@ -45,7 +55,7 @@ function calcVWAP(highs: number[], lows: number[], closes: number[], volumes: nu
   return vwap;
 }
 
-export default function CandlestickChart({ marketData, onVwapCrossUp, onVwapCrossDown }: CandlestickChartProps) {
+export default function CandlestickChart({ marketData, onVwapCrossUp, onVwapCrossDown, priceLines }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -53,6 +63,8 @@ export default function CandlestickChart({ marketData, onVwapCrossUp, onVwapCros
   const ema9SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const ema21SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  // Lista de price-lines criadas para podermos limpar e recriar
+  const priceLinesRef = useRef<Array<{ remove: () => void }>>([]);
 
   // Rastrear cruzamento VWAP: armazena se o último close estava acima da VWAP
   const prevAboveVwapRef = useRef<boolean | null>(null);
@@ -230,6 +242,33 @@ export default function CandlestickChart({ marketData, onVwapCrossUp, onVwapCros
       prevAboveVwapRef.current = isAbove;
     }
   }, [marketData, onVwapCrossUp, onVwapCrossDown]);
+
+  // ─── Price lines extras (entry/stop/gain da predição da IA) ───────────────
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+
+    // Remove price-lines anteriores
+    for (const pl of priceLinesRef.current) {
+      try { pl.remove(); } catch { /* já removida */ }
+    }
+    priceLinesRef.current = [];
+
+    if (!priceLines || priceLines.length === 0) return;
+
+    for (const spec of priceLines) {
+      if (!Number.isFinite(spec.price) || spec.price <= 0) continue;
+      const pl = series.createPriceLine({
+        price: spec.price,
+        color: spec.color,
+        lineWidth: spec.lineWidth ?? 2,
+        lineStyle: spec.lineStyle ?? 2, // dashed por padrão
+        axisLabelVisible: true,
+        title: spec.title ?? "",
+      });
+      priceLinesRef.current.push(pl as any);
+    }
+  }, [priceLines, marketData]);
 
   return (
     <div ref={containerRef} className="w-full h-full relative" style={{ minHeight: 200 }}>
