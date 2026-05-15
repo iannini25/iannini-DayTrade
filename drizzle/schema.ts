@@ -145,3 +145,14 @@ export const interCredentials = mysqlTable("inter_credentials", {
 
 export type InterCredentials = typeof interCredentials.$inferSelect;
 export type InsertInterCredentials = typeof interCredentials.$inferInsert;
+
+// Conteúdo educacional gerado pelo LLM e cacheado (1x por tópico)
+export const educationalContent = mysqlTable("educational_content", {
+  id: int("id").autoincrement().primaryKey(),
+  topic: varchar("topic", { length: 100 }).notNull().unique(),
+  content: text("content").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type EducationalContent = typeof educationalContent.$inferSelect;
+export type InsertEducationalContent = typeof educationalContent.$inferInsert;

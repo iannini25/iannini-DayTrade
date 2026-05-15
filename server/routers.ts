@@ -17,6 +17,14 @@ import {
   formatStatsForPrompt,
 } from "./services/predictionStats";
 import { fetchMarketNews, formatNewsForPrompt } from "./services/newsRss";
+import {
+  EDUCATION_TOPICS,
+  STATIC_CONTENT,
+  buildMarketNarrative,
+  getProfitGuide,
+  type EducationTopic,
+} from "./services/education";
+import { generateStepByStep } from "@shared/ntslGenerator";
 import { protectedProcedure, publicProcedure, router } from "./trpc";
 import { getStockChart, extractQuoteMeta } from "./yahooFinance";
 import { invokeLLM } from "./services/llm";
@@ -33,6 +41,7 @@ import {
   getPredictions, insertPrediction, updatePredictionStatus,
   getUserSettings, upsertUserSettings,
   getInterCredentials, upsertInterCredentials,
+  getEducationalContent, upsertEducationalContent,
 } from "./db";
 
 const loginRateCheck = makeProcedureLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
@@ -852,6 +861,110 @@ openssl req -x509 -newkey rsa:2048 -keyout chave_privada.key \\
       };
     }),
   }),
+
+  // ─── EDUCAÇÃO ─────────────────────────────────────────────────────────────
+  education: router({
+    // "O Mercado Agora" + "O que fazer agora" (narrativa baseada nos indicadores)
+    getMarketNarrative: protectedProcedure.query(async ({ ctx }) => {
+      const settings = await getUserSettings(ctx.user.id);
+      const params = {
+        stopLossPoints: settings?.stopLossPoints ?? 150,
+        takeProfitPoints: settings?.takeProfitPoints ?? 250,
+        preferredContracts: settings?.preferredContracts ?? 5,
+        riskProfile: (settings?.riskProfile ?? "moderate") as "conservative" | "moderate" | "aggressive",
+      };
+      let signal = null;
+      try {
+        const chart = await getStockChart({ symbol: "WIN=F", interval: "5m", range: "1d" });
+        const candles = extractCandles(chart);
+        if (candles.length >= 21) {
+          signal = generateTechnicalSignal(candles, params);
+        }
+      } catch {
+        /* sem dados — narrativa de fallback */
+      }
+      const now = new Date();
+      const narrative = buildMarketNarrative(signal, now);
+      const steps = signal
+        ? generateStepByStepForEducation(signal)
+        : [];
+      return {
+        narrative,
+        steps,
+        signal: signal
+          ? {
+              signalType: signal.signalType,
+              confidence: signal.confidence,
+              indicators: signal.indicators,
+              strategyExplanation: signal.strategyExplanation,
+            }
+          : null,
+        generatedAt: now.toISOString(),
+      };
+    }),
+
+    // Biblioteca de conceitos. Conteúdo estático de qualidade; se OPENAI estiver
+    // configurada, enriquece e cacheia no banco (1x por tópico).
+    getContent: publicProcedure.query(async () => {
+      const out: Array<{ topic: string; title: string; content: string }> = [];
+      for (const topic of EDUCATION_TOPICS) {
+        const stat = STATIC_CONTENT[topic];
+        let content = stat.content;
+        try {
+          const cached = await getEducationalContent(topic);
+          if (cached?.content) {
+            content = cached.content;
+          } else if (ENV.openaiApiKey) {
+            const r = await invokeLLM({
+              messages: [
+                { role: "system", content: "Você é um educador de Day Trade do Mini Índice (WIN) na B3. Escreva didático, direto, em português, 2-3 parágrafos." },
+                { role: "user", content: `Explique para um trader iniciante: ${stat.title}. Foque no uso prático no Mini Índice.` },
+              ],
+            });
+            const llmText = (r as any)?.choices?.[0]?.message?.content;
+            if (typeof llmText === "string" && llmText.length > 50) {
+              content = llmText;
+              await upsertEducationalContent(topic, llmText).catch(() => {});
+            }
+          }
+        } catch {
+          /* mantém estático */
+        }
+        out.push({ topic, title: stat.title, content });
+      }
+      return { topics: out };
+    }),
+  }),
+
+  // ─── INTEGRAÇÃO PROFIT ONE PRO ────────────────────────────────────────────
+  integration: router({
+    getProfitGuide: publicProcedure.query(() => {
+      return { sections: getProfitGuide() };
+    }),
+  }),
 });
+
+// Helper local: passos didáticos para a aba de educação
+function generateStepByStepForEducation(signal: TechnicalSignal): string[] {
+  const lo = signal.entryZoneLow;
+  const hi = signal.entryZoneHigh;
+  const entryMid = Math.round((lo + hi) / 2);
+  const stopPts = Math.abs(entryMid - signal.stopLoss);
+  const gainPts = Math.abs(signal.takeProfit - entryMid);
+  return generateStepByStep({
+    signalType: signal.signalType,
+    currentPrice: signal.indicators.currentPrice,
+    entryZoneLow: lo,
+    entryZoneHigh: hi,
+    stopLoss: signal.stopLoss,
+    takeProfit: signal.takeProfit,
+    stopPoints: stopPts,
+    gainPoints: gainPts,
+    contracts: signal.suggestedContracts || 5,
+    ema9: signal.indicators.ema9,
+    ema21: signal.indicators.ema21,
+    vwap: signal.indicators.vwap,
+  });
+}
 
 export type AppRouter = typeof appRouter;

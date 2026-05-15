@@ -96,6 +96,7 @@ import {
   predictions, InsertPrediction, Prediction,
   userSettings, InsertUserSettings, UserSettings,
   interCredentials, InsertInterCredentials, InterCredentials,
+  educationalContent, EducationalContent,
 } from "../drizzle/schema";
 
 export async function getPredictions(userId: number, limit = 10): Promise<Prediction[]> {
@@ -180,4 +181,20 @@ export async function upsertInterCredentials(userId: number, data: Partial<Inser
   await db.insert(interCredentials)
     .values({ userId, ...data } as InsertInterCredentials)
     .onDuplicateKeyUpdate({ set: { ...data, updatedAt: new Date() } });
+}
+
+// ---- EDUCATIONAL CONTENT ----
+export async function getEducationalContent(topic: string): Promise<EducationalContent | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(educationalContent).where(eq(educationalContent.topic, topic)).limit(1);
+  return rows.length > 0 ? rows[0]! : null;
+}
+
+export async function upsertEducationalContent(topic: string, content: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.insert(educationalContent)
+    .values({ topic, content })
+    .onDuplicateKeyUpdate({ set: { content, updatedAt: new Date() } });
 }
