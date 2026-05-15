@@ -154,6 +154,12 @@ export default function AiTrading() {
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Brain className="w-6 h-6 text-primary" />
             IA Operacional
+            {settings?.enableLiveTrading && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sell/20 text-sell border border-sell/40">
+                <span className="w-1.5 h-1.5 rounded-full bg-sell animate-pulse" />
+                AO VIVO
+              </span>
+            )}
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Análise em tempo real + código NTSL pronto para o Profit One Pro

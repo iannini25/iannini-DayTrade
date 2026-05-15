@@ -491,19 +491,19 @@ export const appRouter = router({
     toggleLiveTrading: protectedProcedure
       .input(z.object({ enabled: z.boolean() }))
       .mutation(async ({ ctx, input }) => {
-        const { TRPCError } = await import("@trpc/server");
-        if (input.enabled) {
-          const creds = await getInterCredentials(ctx.user.id);
-          if (!creds || creds.status !== "active") {
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message:
-                "Para ativar Live Trading, configure as credenciais do Banco Inter na página /inter e valide a conexão.",
-            });
-          }
-        }
+        // Live Trading = modo de orientação ativa da IA (auto-refresh, alertas,
+        // painel em destaque). NÃO envia ordens reais sozinho — o envio real só
+        // acontece quando a integração Banco Inter estiver `active` (hoje mock).
+        // Por isso o toggle é livre; o PaperTradingBanner continua mostrando
+        // SIMULAÇÃO até o Inter estar realmente ativo.
+        const creds = await getInterCredentials(ctx.user.id);
+        const interActive = creds?.status === "active";
         await upsertUserSettings(ctx.user.id, { enableLiveTrading: input.enabled });
-        return { enableLiveTrading: input.enabled };
+        return {
+          enableLiveTrading: input.enabled,
+          interActive,
+          mode: input.enabled && interActive ? "live" : input.enabled ? "orientation" : "off",
+        };
       }),
   }),
 

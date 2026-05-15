@@ -31,7 +31,8 @@ export async function insertTrade(trade: InsertTrade): Promise<{ id: number }> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const result = await db.insert(trades).values(trade);
-  return { id: Number((result as unknown as { insertId: number }).insertId) };
+  const id = safeInsertId(result);
+  return { id: isNaN(id) ? 0 : id };
 }
 
 export async function updateTrade(id: number, userId: number, data: Partial<Trade>): Promise<void> {
@@ -106,13 +107,35 @@ export async function getPredictions(userId: number, limit = 10): Promise<Predic
     .limit(limit);
 }
 
+/** Converte insertId (bigint | number | string | undefined) para number seguro, ou NaN. */
+export function safeInsertId(result: unknown): number {
+  const raw = (result as any)?.insertId ?? (result as any)?.[0]?.insertId;
+  if (raw === undefined || raw === null) return NaN;
+  const n = typeof raw === "bigint" ? Number(raw) : Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+}
+
 export async function insertPrediction(data: InsertPrediction): Promise<Prediction> {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   const result = await db.insert(predictions).values(data);
-  const id = Number((result as unknown as { insertId: number }).insertId);
-  const rows = await db.select().from(predictions).where(eq(predictions.id, id)).limit(1);
-  return rows[0]!;
+
+  const id = safeInsertId(result);
+  if (!isNaN(id) && id > 0) {
+    const rows = await db.select().from(predictions).where(eq(predictions.id, id)).limit(1);
+    if (rows[0]) return rows[0];
+  }
+
+  // Fallback: driver não retornou insertId utilizável (TiDB/alguns MySQL).
+  // Busca a predição mais recente do usuário (acabamos de inserir).
+  const fallback = await db
+    .select()
+    .from(predictions)
+    .where(eq(predictions.userId, data.userId))
+    .orderBy(desc(predictions.createdAt))
+    .limit(1);
+  if (!fallback[0]) throw new Error("Falha ao recuperar predição após insert");
+  return fallback[0];
 }
 
 export async function updatePredictionStatus(
