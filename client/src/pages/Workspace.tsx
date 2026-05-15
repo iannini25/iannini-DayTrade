@@ -126,6 +126,13 @@ export default function Workspace() {
     { refetchInterval: 60000 }
   );
 
+  // Freshness da cotação
+  const quoteFetchedAt = (marketData as any)?.fetchedAt
+    ? new Date((marketData as any).fetchedAt).getTime()
+    : null;
+  const quoteStale = quoteFetchedAt ? Date.now() - quoteFetchedAt > 5 * 60 * 1000 : false;
+  const quoteFallback = (marketData as any)?.fallback === true;
+
   // Extrair preço atual
   const chartResult = (marketData as any)?.data?.chart?.result?.[0];
   const meta = chartResult?.meta;
@@ -294,6 +301,16 @@ export default function Workspace() {
                 {isPositive ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 {Math.abs(priceChangePct).toFixed(2)}%
               </span>
+              {quoteStale && (
+                <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 border border-amber-400/30">
+                  Cotação desatualizada
+                </span>
+              )}
+              {!quoteStale && quoteFallback && (
+                <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground" title="WIN=F indisponível, exibindo Ibovespa como proxy">
+                  via IBOV
+                </span>
+              )}
             </div>
           )}
         </div>

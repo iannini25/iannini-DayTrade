@@ -21,7 +21,7 @@ import {
   Brain, TrendingUp, TrendingDown, Minus, AlertTriangle,
   Copy, Check, RefreshCw, Code, ListChecks, Clock,
 } from "lucide-react";
-import { generateNtslCode, generateStepByStep } from "@shared/ntslGenerator";
+import { generateNtslCode, generateStepByStep, getSignalQuality } from "@shared/ntslGenerator";
 
 const SIGNAL_COLORS = {
   buy: { color: "text-buy", bg: "bg-buy/10 border-buy/30", icon: TrendingUp, label: "COMPRA" },
@@ -205,13 +205,29 @@ export default function AiTrading() {
               Nenhuma análise gerada ainda. Clique em "Atualizar Análise" para começar.
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <Metric label="Sinal" value={signalConf.label} valueClass={signalConf.color} />
-              <Metric label="Confiança" value={`${latest.confidence}%`} />
-              <Metric label="Entrada" value={inputsForGen ? String(inputsForGen.entryPrice) : "—"} valueClass="text-foreground" mono />
-              <Metric label="Stop" value={inputsForGen ? `${inputsForGen.stopLoss.toFixed(0)} (${inputsForGen.stopPoints}pts)` : "—"} valueClass="text-sell" mono />
-              <Metric label="Alvo" value={inputsForGen ? `${inputsForGen.takeProfit.toFixed(0)} (${inputsForGen.gainPoints}pts)` : "—"} valueClass="text-buy" mono />
-            </div>
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <Metric label="Sinal" value={signalConf.label} valueClass={signalConf.color} />
+                <Metric label="Confiança" value={`${latest.confidence}%`} />
+                <Metric label="Entrada" value={inputsForGen ? String(inputsForGen.entryPrice) : "—"} valueClass="text-foreground" mono />
+                <Metric label="Stop" value={inputsForGen ? `${inputsForGen.stopLoss.toFixed(0)} (${inputsForGen.stopPoints}pts)` : "—"} valueClass="text-sell" mono />
+                <Metric label="Alvo" value={inputsForGen ? `${inputsForGen.takeProfit.toFixed(0)} (${inputsForGen.gainPoints}pts)` : "—"} valueClass="text-buy" mono />
+              </div>
+              {(() => {
+                const q = getSignalQuality(latest.confidence);
+                return (
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Qualidade do Sinal:</span>
+                    <span className={`text-xs font-bold ${q.color}`}>{q.label}</span>
+                    {q.warning && (
+                      <span className="text-xs text-sell flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> {q.warning}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+            </>
           )}
           {context.indicators && (
             <div className="mt-3 grid grid-cols-4 gap-2 text-[10px] pt-3 border-t border-border/20">

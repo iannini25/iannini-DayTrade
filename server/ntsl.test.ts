@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateNtslCode, generateStepByStep } from "../shared/ntslGenerator";
+import { generateNtslCode, generateStepByStep, getSignalQuality } from "../shared/ntslGenerator";
 
 describe("ntslGenerator.generateNtslCode", () => {
   it("inclui entry price, stop, take profit e contratos nos inputs", () => {
@@ -47,16 +47,60 @@ describe("ntslGenerator.generateNtslCode", () => {
       entryPrice: 130000, stopLossPoints: 150, takeProfitPoints: 250,
       contracts: 5, signalType: "avoid",
     });
-    expect(avoid).toContain("NÃO operar");
+    expect(avoid).toContain("NAO OPERAR");
   });
 
-  it("inclui lógica de breakeven (+100 pts)", () => {
+  it("inclui lógica de breakeven", () => {
     const code = generateNtslCode({
       entryPrice: 130250, stopLossPoints: 150, takeProfitPoints: 250,
       contracts: 5, signalType: "buy",
     });
-    expect(code).toMatch(/breakeven/i);
-    expect(code).toContain("+ 100");
+    expect(code.toLowerCase()).toContain("breakeven");
+    expect(code).toContain("BreakevenAtivacao");
+  });
+
+  it("inclui filtro de horário (HoraInicio/HoraFim) com defaults 915/1700", () => {
+    const code = generateNtslCode({
+      entryPrice: 130250, stopLossPoints: 150, takeProfitPoints: 250,
+      contracts: 5, signalType: "buy",
+    });
+    expect(code).toContain("HoraInicio(915)");
+    expect(code).toContain("HoraFim(1700)");
+    expect(code).toContain("CurrentTime < HoraInicio");
+  });
+
+  it("respeita horaInicio/horaFim customizados", () => {
+    const code = generateNtslCode({
+      entryPrice: 130000, stopLossPoints: 100, takeProfitPoints: 200,
+      contracts: 3, signalType: "sell", horaInicio: 1000, horaFim: 1600,
+    });
+    expect(code).toContain("HoraInicio(1000)");
+    expect(code).toContain("HoraFim(1600)");
+  });
+});
+
+describe("ntslGenerator.getSignalQuality", () => {
+  it("confiança >= 75 = Forte sem aviso", () => {
+    const q = getSignalQuality(80);
+    expect(q.level).toBe("forte");
+    expect(q.warning).toBeNull();
+  });
+
+  it("confiança 50-74 = Moderado sem aviso", () => {
+    expect(getSignalQuality(60).level).toBe("moderado");
+    expect(getSignalQuality(74).level).toBe("moderado");
+    expect(getSignalQuality(50).level).toBe("moderado");
+  });
+
+  it("confiança < 50 = Fraco com aviso", () => {
+    const q = getSignalQuality(40);
+    expect(q.level).toBe("fraco");
+    expect(q.warning).toContain("Aguarde confirmação");
+  });
+
+  it("limites exatos: 75 forte, 49 fraco", () => {
+    expect(getSignalQuality(75).level).toBe("forte");
+    expect(getSignalQuality(49).level).toBe("fraco");
   });
 });
 

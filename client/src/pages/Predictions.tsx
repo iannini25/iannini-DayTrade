@@ -35,6 +35,23 @@ const STATUS_CONFIG = {
   expired: { label: "Expirada", color: "text-muted-foreground" },
 };
 
+function SignalQualityBadge({ confidence }: { confidence: number }) {
+  const level = confidence >= 75 ? "forte" : confidence >= 50 ? "moderado" : "fraco";
+  const conf = {
+    forte: { label: "Forte", cls: "bg-buy/15 text-buy border-buy/30", warn: null },
+    moderado: { label: "Moderado", cls: "bg-amber-400/15 text-amber-400 border-amber-400/30", warn: null },
+    fraco: { label: "Fraco", cls: "bg-sell/15 text-sell border-sell/30", warn: "Aguarde confirmação antes de operar." },
+  }[level];
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${conf.cls}`}>
+        Sinal {conf.label}
+      </span>
+      {conf.warn && <span className="text-[10px] text-sell">{conf.warn}</span>}
+    </div>
+  );
+}
+
 function ConfidenceBar({ value }: { value: number }) {
   const color = value >= 70 ? "bg-buy" : value >= 50 ? "bg-amber-400" : "bg-sell";
   return (
@@ -106,6 +123,9 @@ function PredictionCard({ prediction, onUpdateStatus }: {
             <div className="text-xs text-muted-foreground mb-1">Confiança</div>
             <div className="w-24">
               <ConfidenceBar value={prediction.confidence} />
+            </div>
+            <div className="mt-1.5 flex justify-end">
+              <SignalQualityBadge confidence={prediction.confidence} />
             </div>
           </div>
         </div>

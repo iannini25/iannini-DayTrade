@@ -17,58 +17,116 @@ export type NtslInputs = {
   takeProfitPoints: number;
   contracts: number;
   signalType: "buy" | "sell" | "neutral" | "avoid";
+  breakevenPoints?: number; // default 100
+  horaInicio?: number; // HHMM, default 915
+  horaFim?: number; // HHMM, default 1700
 };
 
 export function generateNtslCode(inputs: NtslInputs): string {
-  const { entryPrice, stopLossPoints, takeProfitPoints, contracts, signalType } = inputs;
+  const {
+    entryPrice, stopLossPoints, takeProfitPoints, contracts, signalType,
+    breakevenPoints = 100, horaInicio = 915, horaFim = 1700,
+  } = inputs;
 
   const entryComment =
     signalType === "buy"
-      ? "// Sinal de COMPRA — entrada a mercado em alta confirmada"
+      ? "// Vies da IA: COMPRA — priorize entradas compradoras neste ciclo"
       : signalType === "sell"
-        ? "// Sinal de VENDA — entrada a mercado em baixa confirmada"
+        ? "// Vies da IA: VENDA — priorize entradas vendedoras neste ciclo"
         : signalType === "avoid"
-          ? "// Sinal: NÃO operar agora — aguardar reversão de condição"
-          : "// Sinal NEUTRO — aguardar direção definida";
+          ? "// Vies da IA: NAO OPERAR — condicao desfavoravel, aguarde reversao"
+          : "// Vies da IA: NEUTRO — aguarde direcao definida antes de operar";
 
   return `// ============================================================
-// Estratégia gerada por Iannini Day Trade (IA Operacional)
-// ${new Date().toLocaleString("pt-BR")}
+// Estrategia gerada por Iannini Day Trade (IA Operacional)
+// Gerado em: ${new Date().toLocaleString("pt-BR")}
+// Cole no editor de estrategias do Profit One Pro (Neologica NTSL v4.3)
+// Timeframe recomendado: 5 minutos | Execucao: Tick a Tick
 // ============================================================
 
 input
-  EntradaPreco(${entryPrice.toFixed(0)});
-  StopLoss(${stopLossPoints});
-  TakeProfit(${takeProfitPoints});
-  Contratos(${contracts});
+  EntradaPreco(${entryPrice.toFixed(0)});      // Preco de referencia da analise
+  StopLoss(${stopLossPoints});                 // Stop em pontos
+  TakeProfit(${takeProfitPoints});             // Alvo em pontos
+  Contratos(${contracts});                     // Quantidade de contratos
+  BreakevenAtivacao(${breakevenPoints});       // Pontos de lucro p/ mover stop ao zero a zero
+  HoraInicio(${horaInicio});                   // Nao opera antes (HHMM)
+  HoraFim(${horaFim});                         // Nao opera depois (HHMM)
 
 var
-  sEMA9    : Float;
-  sEMA21   : Float;
-  sVWAP    : Float;
-  sCruzou  : Boolean;
+  sEMA9     : Float;
+  sEMA21    : Float;
+  sVWAP     : Float;
+  bComprado : Boolean;
+  bVendido  : Boolean;
 
 begin
-  sEMA9  := Media(9, Close);
-  sEMA21 := Media(21, Close);
-  sVWAP  := VWAP;
+  sEMA9     := Media(9, Close);
+  sEMA21    := Media(21, Close);
+  sVWAP     := VWAP;
+  bComprado := IsBought;
+  bVendido  := IsSold;
+
+  // Filtro de horario — so opera dentro da janela definida
+  if (CurrentTime < HoraInicio) or (CurrentTime > HoraFim) then
+  begin
+    // Fora do horario: nao envia novas ordens
+    SetStopLoss(StopLoss);
+    SetProfitTarget(TakeProfit);
+    exit;
+  end;
 
   ${entryComment}
-  if (sEMA9 > sEMA21) and (Close > sVWAP) and (not IsBought) then
-    BuyAtMarket(Contratos)
-  else if (sEMA9 < sEMA21) and (Close < sVWAP) and (not IsSold) then
+
+  // Entrada COMPRA: EMA9 acima da EMA21 e preco acima da VWAP
+  if (sEMA9 > sEMA21) and (Close > sVWAP) and (not bComprado) and (not bVendido) then
+    BuyAtMarket(Contratos);
+
+  // Entrada VENDA: EMA9 abaixo da EMA21 e preco abaixo da VWAP
+  if (sEMA9 < sEMA21) and (Close < sVWAP) and (not bVendido) and (not bComprado) then
     SellShortAtMarket(Contratos);
 
-  // Gestão de risco
+  // Gestao de risco (stop e alvo sempre ativos)
   SetStopLoss(StopLoss);
   SetProfitTarget(TakeProfit);
 
-  // Breakeven automático ao atingir +100 pontos
-  if IsBought and (Close >= EntradaPreco + 100) then
+  // Breakeven automatico: ao atingir +BreakevenAtivacao pontos a favor,
+  // move o stop para o preco de entrada (protege o trade)
+  if bComprado and (Close >= EntradaPreco + BreakevenAtivacao) then
     SetStopLoss(0);
-  if IsSold and (Close <= EntradaPreco - 100) then
+  if bVendido and (Close <= EntradaPreco - BreakevenAtivacao) then
     SetStopLoss(0);
 end;`;
+}
+
+export type SignalQuality = {
+  level: "forte" | "moderado" | "fraco";
+  label: string;
+  warning: string | null;
+  color: string;
+};
+
+/**
+ * Classifica a qualidade do sinal pela confiança (M2c do prompt v4).
+ */
+export function getSignalQuality(confidence: number): SignalQuality {
+  if (confidence >= 75) {
+    return { level: "forte", label: "Forte", warning: null, color: "text-buy" };
+  }
+  if (confidence >= 50) {
+    return {
+      level: "moderado",
+      label: "Moderado",
+      warning: null,
+      color: "text-amber-400",
+    };
+  }
+  return {
+    level: "fraco",
+    label: "Fraco",
+    warning: "Aguarde confirmação antes de operar.",
+    color: "text-sell",
+  };
 }
 
 /**

@@ -247,15 +247,17 @@ export const appRouter = router({
       }))
       .query(async ({ input }) => {
         try {
+          // getStockChart já tenta a cadeia WIN=F → ^BVSP internamente
           const result = await getStockChart({ symbol: "WIN=F", interval: input.interval, range: input.range });
-          return { success: true, data: result };
+          return {
+            success: true,
+            data: result,
+            resolvedSymbol: result.resolvedSymbol ?? "WIN=F",
+            fallback: result.resolvedSymbol !== "WIN=F",
+            fetchedAt: new Date().toISOString(),
+          };
         } catch {
-          try {
-            const result = await getStockChart({ symbol: "^BVSP", interval: input.interval, range: input.range });
-            return { success: true, data: result, fallback: true };
-          } catch {
-            return { success: false, data: null, error: "Dados indisponíveis" };
-          }
+          return { success: false, data: null, error: "Dados indisponíveis", fetchedAt: new Date().toISOString() };
         }
       }),
 
