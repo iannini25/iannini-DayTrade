@@ -469,7 +469,13 @@ export const appRouter = router({
               return await persistAndReturn(ctx.user.id, displaySymbol, llmSignal, "llm");
             }
           } catch (err) {
-            console.warn("[predictions.generate] LLM failed, falling to technical:", err);
+            // Esperado quando a chave OpenAI está sem cota/inválida.
+            // NÃO é erro fatal: caímos para a análise técnica determinística.
+            const msg = err instanceof Error ? err.message : String(err);
+            const short = /insufficient_quota|quota/i.test(msg)
+              ? "OpenAI sem cota — usando análise técnica"
+              : `LLM indisponível (${msg.slice(0, 120)}) — usando análise técnica`;
+            console.warn(`[predictions.generate] ${short}`);
           }
         }
 
