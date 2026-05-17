@@ -133,14 +133,22 @@ export default function Workspace() {
   const quoteStale = quoteFetchedAt ? Date.now() - quoteFetchedAt > 5 * 60 * 1000 : false;
   const quoteFallback = (marketData as any)?.fallback === true;
 
-  // Extrair preço atual
+  // Preço REAL da B3 (quando disponível) — fonte primária de preço
+  const b3 = (marketData as any)?.b3 ?? null;
+
+  // Extrair preço atual — B3 é a fonte primária; Yahoo é fallback
   const chartResult = (marketData as any)?.data?.chart?.result?.[0];
   const meta = chartResult?.meta;
-  const currentPrice = meta?.regularMarketPrice ?? 0;
+  const yahooPrice = meta?.regularMarketPrice ?? 0;
+  const currentPrice = b3?.price && b3.price > 0 ? b3.price : yahooPrice;
   const prevClose = meta?.previousClose ?? meta?.chartPreviousClose ?? 0;
-  const priceChange = currentPrice - prevClose;
-  const priceChangePct = prevClose > 0 ? (priceChange / prevClose) * 100 : 0;
-  const isPositive = priceChange >= 0;
+  const priceChangePct =
+    b3 && typeof b3.changePercent === "number"
+      ? b3.changePercent
+      : prevClose > 0
+        ? ((yahooPrice - prevClose) / prevClose) * 100
+        : 0;
+  const isPositive = priceChangePct >= 0;
 
   // Extrair último valor VWAP para os toasts ricos
   const getLastVwap = useCallback((): number => {
@@ -301,12 +309,27 @@ export default function Workspace() {
                 {isPositive ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                 {Math.abs(priceChangePct).toFixed(2)}%
               </span>
-              {quoteStale && (
+              {b3 && (
+                <span
+                  className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-buy/15 text-buy border border-buy/30"
+                  title={`Cotação real da B3 · ${b3.symbol} · ${b3.marketTime ? new Date(b3.marketTime).toLocaleTimeString("pt-BR") : ""}`}
+                >
+                  B3
+                </span>
+              )}
+              {b3 && (
+                <span className="hidden xl:flex items-center gap-2 text-[10px] text-muted-foreground font-trading">
+                  <span>Abr {b3.open.toLocaleString("pt-BR")}</span>
+                  <span className="text-sell">Mín {b3.min.toLocaleString("pt-BR")}</span>
+                  <span className="text-buy">Máx {b3.max.toLocaleString("pt-BR")}</span>
+                </span>
+              )}
+              {quoteStale && !b3 && (
                 <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-400/15 text-amber-400 border border-amber-400/30">
                   Cotação desatualizada
                 </span>
               )}
-              {!quoteStale && quoteFallback && (
+              {!quoteStale && quoteFallback && !b3 && (
                 <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-muted/30 text-muted-foreground" title="WIN=F indisponível, exibindo Ibovespa como proxy">
                   via IBOV
                 </span>

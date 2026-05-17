@@ -256,19 +256,58 @@ export const appRouter = router({
       }))
       .query(async ({ input }) => {
         try {
-          // getStockChart já tenta a cadeia WIN=F → ^BVSP internamente
+          // Candles (OHLCV) sempre do Yahoo — WIN=F → ^BVSP fallback interno
           const result = await getStockChart({ symbol: "WIN=F", interval: input.interval, range: input.range });
+
+          // Preço REAL do contrato futuro: tenta B3, com fallback pro Yahoo
+          const { getActiveWinContract } = await import("./b3Api");
+          const active = await getActiveWinContract().catch(() => null);
+          const b3 = active?.quote ?? null;
+
           return {
             success: true,
             data: result,
             resolvedSymbol: result.resolvedSymbol ?? "WIN=F",
             fallback: result.resolvedSymbol !== "WIN=F",
             fetchedAt: new Date().toISOString(),
+            // Bloco B3 — null se a B3 estiver inacessível (UI usa Yahoo então)
+            b3: b3
+              ? {
+                  symbol: active!.symbol,
+                  price: b3.price,
+                  open: b3.open,
+                  min: b3.min,
+                  max: b3.max,
+                  changePercent: b3.changePercent,
+                  volume: b3.volume,
+                  vwap: b3.vwap,
+                  marketTime: b3.marketTime,
+                  source: "B3",
+                }
+              : null,
+            activeContract: active
+              ? { symbol: active.symbol, expiry: active.expiry, daysToExpiry: active.daysToExpiry, nearExpiry: active.nearExpiry }
+              : null,
           };
         } catch {
           return { success: false, data: null, error: "Dados indisponíveis", fetchedAt: new Date().toISOString() };
         }
       }),
+
+    // Endpoint de diagnóstico — testar conectividade com a B3 na VPS
+    testB3: publicProcedure.query(async () => {
+      const { getActiveWinContract, getB3WinContracts } = await import("./b3Api");
+      const [active, contracts] = await Promise.all([
+        getActiveWinContract().catch((e) => ({ error: String(e) })),
+        getB3WinContracts().catch(() => []),
+      ]);
+      return {
+        active,
+        contractsCount: Array.isArray(contracts) ? contracts.length : 0,
+        contractsSample: Array.isArray(contracts) ? contracts.slice(0, 5) : [],
+        testedAt: new Date().toISOString(),
+      };
+    }),
 
     getQuote: publicProcedure
       .input(z.object({ symbol: z.string().default("^BVSP") }))
@@ -864,6 +903,73 @@ openssl req -x509 -newkey rsa:2048 -keyout chave_privada.key \\
 
   // ─── EDUCAÇÃO ─────────────────────────────────────────────────────────────
   education: router({
+    // Narrativa B3 + LLM (v5 Seção 1). Usa preço real da B3; se LLM/B3 caírem,
+    // degrada para a narrativa técnica determinística (buildMarketNarrative).
+    getMarketContext: protectedProcedure.query(async ({ ctx }) => {
+      const { getActiveWinContract } = await import("./b3Api");
+      const active = await getActiveWinContract().catch(() => null);
+      const q = active?.quote ?? null;
+      const symbol = active?.symbol ?? "WIN";
+
+      // Narrativa via LLM se houver chave + dados B3
+      if (ENV.openaiApiKey && q) {
+        try {
+          const prompt = `Você é um analista de mercado especializado em futuros do Ibovespa (Mini Índice WIN).
+Com base nos dados abaixo, escreva uma análise narrativa em português (3-5 parágrafos)
+sobre o contexto atual do mercado para um operador de day trade.
+Seja objetivo, profissional e didático. Não use listas ou bullets.
+
+Dados do contrato ${symbol} em ${new Date().toLocaleString("pt-BR")}:
+- Preço atual: ${q.price}
+- Abertura: ${q.open}
+- Mínima do dia: ${q.min}
+- Máxima do dia: ${q.max}
+- Variação: ${q.changePercent}%
+- Volume: ${q.volume} contratos
+- VWAP: ${q.vwap}
+
+Descreva: (1) o que o mercado está fazendo hoje, (2) os níveis técnicos mais importantes,
+(3) o viés predominante (altista/baixista/lateral) e por quê, (4) os riscos e oportunidades
+que o operador deve observar nas próximas horas.`;
+          const response = await invokeLLM({
+            messages: [
+              { role: "system", content: "Você é um analista de mercado especializado em futuros do Ibovespa (Mini Índice WIN). Responda sempre em português, de forma profissional e didática." },
+              { role: "user", content: prompt },
+            ],
+          });
+          const narrative = (response as any)?.choices?.[0]?.message?.content;
+          if (typeof narrative === "string" && narrative.length > 40) {
+            return { narrative, symbol, quote: q, source: "llm+b3", generatedAt: new Date().toISOString() };
+          }
+        } catch {
+          /* cai para a narrativa técnica */
+        }
+      }
+
+      // Fallback: narrativa determinística a partir dos candles
+      const settings = await getUserSettings(ctx.user.id);
+      let signal = null;
+      try {
+        const chart = await getStockChart({ symbol: "WIN=F", interval: "5m", range: "1d" });
+        const candles = extractCandles(chart);
+        if (candles.length >= 21) {
+          signal = generateTechnicalSignal(candles, {
+            stopLossPoints: settings?.stopLossPoints ?? 150,
+            takeProfitPoints: settings?.takeProfitPoints ?? 250,
+            preferredContracts: settings?.preferredContracts ?? 5,
+            riskProfile: (settings?.riskProfile ?? "moderate") as "conservative" | "moderate" | "aggressive",
+          });
+        }
+      } catch { /* fallback de horário */ }
+      return {
+        narrative: buildMarketNarrative(signal, new Date()),
+        symbol,
+        quote: q,
+        source: q ? "technical+b3" : "technical",
+        generatedAt: new Date().toISOString(),
+      };
+    }),
+
     // "O Mercado Agora" + "O que fazer agora" (narrativa baseada nos indicadores)
     getMarketNarrative: protectedProcedure.query(async ({ ctx }) => {
       const settings = await getUserSettings(ctx.user.id);
