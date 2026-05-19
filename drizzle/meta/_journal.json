@@ -43,6 +43,13 @@
       "when": 1778862891385,
       "tag": "0005_absent_the_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1779154086131,
+      "tag": "0006_simple_absorbing_man",
+      "breakpoints": true
     }
   ]
 }

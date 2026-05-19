@@ -528,13 +528,17 @@ export const appRouter = router({
         enableAutoBreakeven: z.boolean().optional(),
         pauseAfterLosses: z.number().min(1).max(10).optional(),
         requireOrderConfirmation: z.boolean().optional(),
+        breakevenTriggerPoints: z.number().min(50).max(300).optional(),
+        maxContractsLimit: z.number().min(1).max(20).optional(),
+        marginLimitBrl: z.number().min(500).max(100000).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
-        const { dailyGoal, dailyLimit, ...rest } = input;
+        const { dailyGoal, dailyLimit, marginLimitBrl, ...rest } = input;
         return upsertUserSettings(ctx.user.id, {
           ...rest,
           ...(dailyGoal !== undefined ? { dailyGoal: String(dailyGoal) as unknown as any } : {}),
           ...(dailyLimit !== undefined ? { dailyLimit: String(dailyLimit) as unknown as any } : {}),
+          ...(marginLimitBrl !== undefined ? { marginLimitBrl: String(marginLimitBrl) as unknown as any } : {}),
         });
       }),
 

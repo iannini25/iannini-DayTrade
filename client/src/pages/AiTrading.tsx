@@ -18,9 +18,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
 import {
   Brain, TrendingUp, TrendingDown, Minus, AlertTriangle,
   Copy, Check, RefreshCw, Code, ListChecks, Clock,
+  Sliders, ChevronDown, ChevronUp, Save,
 } from "lucide-react";
 import { generateNtslCode, generateStepByStep, getSignalQuality } from "@shared/ntslGenerator";
 
@@ -33,6 +35,15 @@ const SIGNAL_COLORS = {
 
 export default function AiTrading() {
   const [copied, setCopied] = useState(false);
+  const [ntslPanelOpen, setNtslPanelOpen] = useState(false);
+  const [ntslForm, setNtslForm] = useState({
+    contracts: 5,
+    stopPoints: 150,
+    gainPoints: 250,
+    breakevenPoints: 100,
+    maxContracts: 10,
+    marginLimit: 5000,
+  });
   const [showActivationConfirm, setShowActivationConfirm] = useState(false);
 
   const { data: settings, refetch: refetchSettings } = trpc.userSettings.get.useQuery();
@@ -117,8 +128,9 @@ export default function AiTrading() {
       takeProfitPoints: inputsForGen.gainPoints,
       contracts: inputsForGen.contracts,
       signalType: inputsForGen.signalType,
+      breakevenPoints: ntslForm.breakevenPoints,
     });
-  }, [inputsForGen]);
+  }, [inputsForGen, ntslForm.breakevenPoints]);
 
   const stepByStep = useMemo(() => {
     if (!inputsForGen) return [];
@@ -157,6 +169,55 @@ export default function AiTrading() {
       refetchPredictions();
     } catch (e: any) {
       toast.error("Falha ao gerar análise", { description: e?.message });
+    }
+  };
+
+  // Seed do painel NTSL a partir das configurações salvas
+  useEffect(() => {
+    if (!settings) return;
+    setNtslForm({
+      contracts: settings.preferredContracts ?? 5,
+      stopPoints: settings.stopLossPoints ?? 150,
+      gainPoints: settings.takeProfitPoints ?? 250,
+      breakevenPoints: (settings as any).breakevenTriggerPoints ?? 100,
+      maxContracts: (settings as any).maxContractsLimit ?? 10,
+      marginLimit: Number((settings as any).marginLimitBrl ?? 5000),
+    });
+  }, [settings]);
+
+  const saveSettings = trpc.userSettings.save.useMutation();
+
+  // Validação de margem em tempo real
+  const riskPerTrade = ntslForm.contracts * ntslForm.stopPoints * 0.2;
+  const rewardPerTrade = ntslForm.contracts * ntslForm.gainPoints * 0.2;
+  const rrRatio = riskPerTrade > 0 ? rewardPerTrade / riskPerTrade : 0;
+  const overMargin = riskPerTrade > ntslForm.marginLimit;
+  const overContracts = ntslForm.contracts > ntslForm.maxContracts;
+
+  const handleSaveNtsl = async () => {
+    if (overMargin) {
+      toast.error("Risco excede a margem configurada. Ajuste antes de salvar.");
+      return;
+    }
+    if (overContracts) {
+      toast.error(`Contratos acima do limite (${ntslForm.maxContracts}).`);
+      return;
+    }
+    try {
+      await saveSettings.mutateAsync({
+        preferredContracts: ntslForm.contracts,
+        stopLossPoints: ntslForm.stopPoints,
+        takeProfitPoints: ntslForm.gainPoints,
+        breakevenTriggerPoints: ntslForm.breakevenPoints,
+        maxContractsLimit: ntslForm.maxContracts,
+        marginLimitBrl: ntslForm.marginLimit,
+      });
+      await refetchSettings();
+      await generateMutation.mutateAsync({ symbol: "WIN", forceRefresh: true });
+      refetchPredictions();
+      toast.success("Parâmetros salvos — código NTSL regenerado");
+    } catch (e: any) {
+      toast.error("Falha ao salvar parâmetros", { description: e?.message });
     }
   };
 
@@ -306,6 +367,71 @@ export default function AiTrading() {
         </Card>
       )}
 
+      {/* Painel de parâmetros NTSL (v6 Item 4b) */}
+      <Card className="border-border" style={{ background: "oklch(0.10 0.01 240)" }}>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center justify-between">
+            <button
+              onClick={() => setNtslPanelOpen((v) => !v)}
+              className="flex items-center gap-2 hover:text-primary transition-colors"
+            >
+              <Sliders className="w-4 h-4 text-primary" />
+              Parâmetros do Código NTSL
+              {ntslPanelOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </button>
+            {ntslPanelOpen && (
+              <Button
+                onClick={handleSaveNtsl}
+                size="sm"
+                className="h-7 gap-1.5"
+                disabled={saveSettings.isPending || overMargin || overContracts}
+              >
+                <Save className="w-3.5 h-3.5" />
+                Salvar
+              </Button>
+            )}
+          </CardTitle>
+        </CardHeader>
+        {ntslPanelOpen && (
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <NtslField label={`Nº de Contratos (máx ${ntslForm.maxContracts})`} value={ntslForm.contracts}
+                onChange={(v) => setNtslForm((f) => ({ ...f, contracts: v }))} />
+              <NtslField label="Stop Loss (pontos)" value={ntslForm.stopPoints}
+                onChange={(v) => setNtslForm((f) => ({ ...f, stopPoints: v }))} />
+              <NtslField label="Take Profit (pontos)" value={ntslForm.gainPoints}
+                onChange={(v) => setNtslForm((f) => ({ ...f, gainPoints: v }))} />
+              <NtslField label="Breakeven em (pontos)" value={ntslForm.breakevenPoints}
+                onChange={(v) => setNtslForm((f) => ({ ...f, breakevenPoints: v }))} />
+              <NtslField label="Limite de contratos" value={ntslForm.maxContracts}
+                onChange={(v) => setNtslForm((f) => ({ ...f, maxContracts: v }))} />
+              <NtslField label="Limite de margem (R$)" value={ntslForm.marginLimit}
+                onChange={(v) => setNtslForm((f) => ({ ...f, marginLimit: v }))} />
+            </div>
+            <div className="text-xs space-y-1">
+              <p className="text-muted-foreground">
+                Risco por operação: <strong className="text-loss">R$ {riskPerTrade.toFixed(2)}</strong>
+                {" · "}Retorno: <strong className="text-buy">R$ {rewardPerTrade.toFixed(2)}</strong>
+                {" · "}R/R: <strong className={rrRatio >= 1.5 ? "text-buy" : "text-amber-400"}>1:{rrRatio.toFixed(2)}</strong>
+              </p>
+              {overMargin ? (
+                <p className="text-sell font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> Risco excede a margem configurada (R$ {ntslForm.marginLimit.toLocaleString("pt-BR")})
+                </p>
+              ) : overContracts ? (
+                <p className="text-sell font-medium flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> Contratos acima do limite ({ntslForm.maxContracts})
+                </p>
+              ) : rrRatio < 1.5 ? (
+                <p className="text-amber-400 font-medium">Relação R/R abaixo de 1:1,5 — não recomendado</p>
+              ) : (
+                <p className="text-buy font-medium">✓ Parâmetros dentro da margem de segurança</p>
+              )}
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
       {/* Código NTSL (M6a) */}
       {ntslCode && (
         <Card className="border-border" style={{ background: "oklch(0.10 0.01 240)" }}>
@@ -395,6 +521,20 @@ function SmallMetric({ label, value }: { label: string; value: string }) {
     <div className="text-center">
       <p className="text-muted-foreground">{label}</p>
       <p className="font-trading font-semibold text-foreground text-xs mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+function NtslField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <div>
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">{label}</p>
+      <Input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+        className="h-8 font-trading text-sm"
+      />
     </div>
   );
 }

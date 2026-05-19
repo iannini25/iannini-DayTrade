@@ -17,6 +17,7 @@ import UserSettings from "./pages/UserSettings";
 import AiTrading from "./pages/AiTrading";
 import MobilePage from "./pages/Mobile";
 import Education from "./pages/Education";
+import Iniciante from "./pages/Iniciante";
 import AuthGuard from "./components/AuthGuard";
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect } from "react";
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
   { path: "/dashboard",         label: "Performance",   icon: BarChart3,       group: "análise" },
   { path: "/risk-calculator",   label: "Calculadora",   icon: Calculator,      group: "análise" },
   { path: "/oco-config",        label: "Config. OCO",   icon: Settings2,       group: "análise" },
+  { path: "/iniciante",         label: "Modo Iniciante", icon: GraduationCap,  group: "ferramentas" },
   { path: "/education",         label: "Educação",      icon: GraduationCap,   group: "ferramentas" },
   { path: "/economic-calendar", label: "Calendário",    icon: Calendar,        group: "ferramentas" },
   { path: "/inter",             label: "Banco Inter",   icon: Building2,       group: "ferramentas" },
@@ -218,6 +220,9 @@ function Router() {
       </Route>
       <Route path="/education">
         <AuthGuard><AppLayout><Education /></AppLayout></AuthGuard>
+      </Route>
+      <Route path="/iniciante">
+        <AuthGuard><AppLayout><Iniciante /></AppLayout></AuthGuard>
       </Route>
       <Route path="/predictions">
         <AuthGuard><AppLayout><Predictions /></AppLayout></AuthGuard>

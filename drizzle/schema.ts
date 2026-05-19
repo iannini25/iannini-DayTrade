@@ -120,6 +120,10 @@ export const userSettings = mysqlTable("user_settings", {
   tradingPaused: boolean("tradingPaused").default(false).notNull(),
   enableLiveTrading: boolean("enableLiveTrading").default(false).notNull(),
   requireOrderConfirmation: boolean("requireOrderConfirmation").default(true).notNull(),
+  // ── Parâmetros NTSL / margem ──────────────────────────────
+  breakevenTriggerPoints: int("breakevenTriggerPoints").notNull().default(100),
+  maxContractsLimit: int("maxContractsLimit").notNull().default(10),
+  marginLimitBrl: decimal("marginLimitBrl", { precision: 10, scale: 2 }).notNull().default("5000"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
