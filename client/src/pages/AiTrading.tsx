@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
+import { useSignalAlert } from "@/hooks/useSignalAlert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -55,6 +56,27 @@ export default function AiTrading() {
     if (!latest?.marketContext) return {} as any;
     try { return JSON.parse(latest.marketContext); } catch { return {}; }
   }, [latest]);
+
+  // Alerta sonoro ao MUDAR de sinal (respeitando enableSoundAlerts)
+  const { playAlert } = useSignalAlert();
+  const prevSignalRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!settings?.enableSoundAlerts) return;
+    const sig = latest?.signalType;
+    const conf = latest?.confidence ?? 0;
+    if (!sig) return;
+    if (prevSignalRef.current === sig) return;
+    prevSignalRef.current = sig;
+    if (sig === "buy" && conf >= 60) {
+      playAlert("buy");
+      toast.success("🔔 Sinal de COMPRA detectado!", { duration: 5000 });
+    } else if (sig === "sell" && conf >= 60) {
+      playAlert("sell");
+      toast.error("🔔 Sinal de VENDA detectado!", { duration: 5000 });
+    } else if (sig === "avoid" || conf < 40) {
+      playAlert("warning");
+    }
+  }, [latest?.signalType, latest?.confidence, settings?.enableSoundAlerts, playAlert]);
 
   const signalConf =
     SIGNAL_COLORS[(latest?.signalType ?? "neutral") as keyof typeof SIGNAL_COLORS] ??

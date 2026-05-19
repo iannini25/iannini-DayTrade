@@ -12,6 +12,7 @@ import {
   Pause, Play, Target, Smartphone, Brain
 } from "lucide-react";
 import { setPreferredLayout, getRouteForLayout } from "@/lib/layoutPreference";
+import { getRefetchInterval } from "@/hooks/useRefetchInterval";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -112,7 +113,7 @@ export default function Workspace() {
 
   const { data: marketData } = trpc.market.getWinData.useQuery(
     { interval: "5m", range: "1d" },
-    { refetchInterval: 30000, staleTime: 25000 }
+    { refetchInterval: getRefetchInterval, staleTime: 12000 }
   );
 
   // Contrato WIN ativo (ex.: WINM26) — atualiza só de hora em hora

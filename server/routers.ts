@@ -332,7 +332,8 @@ export const appRouter = router({
 
       const results = await Promise.allSettled(
         symbols.map(async (s) => {
-          const result = await getStockChart({ symbol: s.symbol, interval: "1d", range: "5d" });
+          // 1m/1d traz o regularMarketPrice intraday (não o fechamento de ontem)
+          const result = await getStockChart({ symbol: s.symbol, interval: "1m", range: "1d" });
           const extracted = extractQuoteMeta(result);
           return {
             ...s,
@@ -384,7 +385,7 @@ export const appRouter = router({
       ];
       const results = await Promise.allSettled(
         stocks.map(async (symbol) => {
-          const result = await getStockChart({ symbol, interval: "1d", range: "5d" });
+          const result = await getStockChart({ symbol, interval: "1m", range: "1d" });
           const extracted = extractQuoteMeta(result);
           return {
             symbol: symbol.replace(".SA", ""),

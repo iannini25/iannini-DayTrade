@@ -122,6 +122,9 @@ export function extractQuoteMeta(result: YFChartResult) {
   const currentPrice = meta?.regularMarketPrice ?? closes[closes.length - 1];
   const change = prevClose && currentPrice ? currentPrice - prevClose : 0;
   const changePct = prevClose && prevClose !== 0 ? (change / prevClose) * 100 : 0;
+  if (!currentPrice || currentPrice === 0) {
+    console.warn(`[yahooFinance] extractQuoteMeta: price=0 para ${meta?.symbol ?? "?"} (sem regularMarketPrice nem closes)`);
+  }
   return {
     symbol: meta.symbol,
     name: meta.longName ?? meta.symbol,

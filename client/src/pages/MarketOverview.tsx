@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
+import { getRefetchInterval } from "@/hooks/useRefetchInterval";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,9 +23,14 @@ function PriceChange({ value, suffix = "%" }: { value: number; suffix?: string }
   );
 }
 
-function IndexCard({ index }: { index: any }) {
+function IndexCard({ index, updatedAt }: { index: any; updatedAt?: number }) {
   const isPositive = index.changePct > 0;
   const isNeutral = index.changePct === 0;
+  const ageMs = updatedAt ? Date.now() - updatedAt : null;
+  const stale = ageMs !== null && ageMs > 5 * 60 * 1000;
+  const updatedLabel = updatedAt
+    ? new Date(updatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    : null;
   const borderColor = isNeutral ? "border-border" : isPositive ? "border-buy/30" : "border-sell/30";
   const bgGlow = isNeutral ? "" : isPositive ? "shadow-[0_0_20px_oklch(0.65_0.15_142/0.08)]" : "shadow-[0_0_20px_oklch(0.65_0.15_0/0.08)]";
 
@@ -54,6 +60,12 @@ function IndexCard({ index }: { index: any }) {
             <span>Máx: <span className="text-buy font-trading">{index.high.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</span></span>
             <span>Mín: <span className="text-sell font-trading">{index.low.toLocaleString("pt-BR", { minimumFractionDigits: 0 })}</span></span>
           </div>
+        )}
+        {updatedLabel && (
+          <p className={`mt-2 text-[10px] flex items-center gap-1 ${stale ? "text-amber-400" : "text-muted-foreground/60"}`}>
+            {stale && <AlertTriangle className="w-3 h-3" />}
+            Atualizado {updatedLabel}{stale ? " (desatualizado)" : ""}
+          </p>
         )}
       </CardContent>
     </Card>
@@ -178,11 +190,11 @@ function SignalCarousel({ gainers, losers }: { gainers: any[]; losers: any[] }) 
 }
 
 export default function MarketOverview() {
-  const { data: indices, refetch: refetchIndices, isLoading: loadingIndices } = trpc.market.getIndices.useQuery(undefined, {
-    refetchInterval: 60000,
+  const { data: indices, refetch: refetchIndices, isLoading: loadingIndices, dataUpdatedAt: indicesUpdatedAt } = trpc.market.getIndices.useQuery(undefined, {
+    refetchInterval: getRefetchInterval,
   });
   const { data: movers, refetch: refetchMovers, isLoading: loadingMovers } = trpc.market.getTopMovers.useQuery(undefined, {
-    refetchInterval: 120000,
+    refetchInterval: getRefetchInterval,
   });
 
   const [lastUpdate, setLastUpdate] = useState(new Date());
@@ -244,7 +256,7 @@ export default function MarketOverview() {
         ) : (
           <div className="grid grid-cols-5 gap-3">
             {(indices ?? []).map((index) => (
-              <IndexCard key={index.shortName} index={index} />
+              <IndexCard key={index.shortName} index={index} updatedAt={indicesUpdatedAt} />
             ))}
           </div>
         )}
