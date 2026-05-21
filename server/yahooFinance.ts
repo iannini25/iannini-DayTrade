@@ -24,6 +24,7 @@ export type YFChartResult = {
         regularMarketDayHigh: number;
         regularMarketDayLow: number;
         regularMarketVolume: number;
+        regularMarketTime?: number; // unix seconds
         previousClose?: number;
         chartPreviousClose?: number;
       };
@@ -67,9 +68,32 @@ async function fetchChart(
   url.searchParams.set("includePrePost", "false");
   url.searchParams.set("events", "div,split");
 
-  const res = await fetch(url.toString(), { headers: HEADERS });
-  if (!res.ok) throw new Error(`Yahoo Finance error ${res.status} for ${symbol}`);
-  return res.json() as Promise<YFChartResult>;
+  // Retry com backoff para mitigar 429 (rate limit do Yahoo Finance).
+  const delays = [0, 1000, 3000];
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt]! > 0) {
+      await new Promise((r) => setTimeout(r, delays[attempt]!));
+    }
+    try {
+      const res = await fetch(url.toString(), {
+        headers: HEADERS,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.status === 429) {
+        console.warn(`[yahooFinance] 429 em ${symbol}, tentativa ${attempt + 1}/${delays.length}`);
+        lastErr = new Error(`Yahoo Finance 429 for ${symbol}`);
+        continue;
+      }
+      if (!res.ok) throw new Error(`Yahoo Finance error ${res.status} for ${symbol}`);
+      return (await res.json()) as YFChartResult;
+    } catch (err) {
+      lastErr = err;
+      // timeout/network também aceita retry
+      if (attempt === delays.length - 1) throw err;
+    }
+  }
+  throw lastErr ?? new Error(`Yahoo Finance: todas as tentativas falharam para ${symbol}`);
 }
 
 /**
@@ -118,7 +142,10 @@ export function extractQuoteMeta(result: YFChartResult) {
   const meta = r.meta;
   const quotes = r.indicators?.quote?.[0];
   const closes = (quotes?.close ?? []).filter((v): v is number => v !== null);
-  const prevClose = closes[closes.length - 2] ?? meta?.previousClose ?? meta?.chartPreviousClose;
+  // Com interval=1m, closes[length-2] seria o candle de 1 min atrás, NÃO o fechamento
+  // do dia anterior. Por isso usamos chartPreviousClose (oficial Yahoo) como referência
+  // de prevClose e caímos para previousClose ou para o primeiro close apenas em último caso.
+  const prevClose = meta?.chartPreviousClose ?? meta?.previousClose ?? closes[0];
   const currentPrice = meta?.regularMarketPrice ?? closes[closes.length - 1];
   const change = prevClose && currentPrice ? currentPrice - prevClose : 0;
   const changePct = prevClose && prevClose !== 0 ? (change / prevClose) * 100 : 0;
@@ -135,5 +162,6 @@ export function extractQuoteMeta(result: YFChartResult) {
     low: meta.regularMarketDayLow ?? 0,
     volume: meta.regularMarketVolume ?? 0,
     prevClose: prevClose ?? 0,
+    marketTime: meta?.regularMarketTime ?? 0,
   };
 }

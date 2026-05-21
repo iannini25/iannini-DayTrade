@@ -26,10 +26,19 @@ function PriceChange({ value, suffix = "%" }: { value: number; suffix?: string }
 function IndexCard({ index, updatedAt }: { index: any; updatedAt?: number }) {
   const isPositive = index.changePct > 0;
   const isNeutral = index.changePct === 0;
-  const ageMs = updatedAt ? Date.now() - updatedAt : null;
+  // Prioriza o horário REAL da cotação (marketTime do provedor) sobre o horário do fetch
+  const apiTimeMs = index.marketTime && index.marketTime > 0 ? index.marketTime * 1000 : null;
+  const refTime = apiTimeMs ?? updatedAt ?? null;
+  const ageMs = refTime ? Date.now() - refTime : null;
   const stale = ageMs !== null && ageMs > 5 * 60 * 1000;
-  const updatedLabel = updatedAt
-    ? new Date(updatedAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+  const updatedLabel = refTime
+    ? new Date(refTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+    : null;
+  const sourceLabel =
+    index.source === "awesomeapi" ? "AwesomeAPI"
+    : index.source === "b3-smal11" ? "B3/SMAL11"
+    : index.source === "unavailable" ? "indisponível"
+    : index.source === "yahoo" ? "Yahoo"
     : null;
   const borderColor = isNeutral ? "border-border" : isPositive ? "border-buy/30" : "border-sell/30";
   const bgGlow = isNeutral ? "" : isPositive ? "shadow-[0_0_20px_oklch(0.65_0.15_142/0.08)]" : "shadow-[0_0_20px_oklch(0.65_0.15_0/0.08)]";
@@ -62,10 +71,13 @@ function IndexCard({ index, updatedAt }: { index: any; updatedAt?: number }) {
           </div>
         )}
         {updatedLabel && (
-          <p className={`mt-2 text-[10px] flex items-center gap-1 ${stale ? "text-amber-400" : "text-muted-foreground/60"}`}>
-            {stale && <AlertTriangle className="w-3 h-3" />}
-            Atualizado {updatedLabel}{stale ? " (desatualizado)" : ""}
-          </p>
+          <div className={`mt-2 flex items-center justify-between gap-1 text-[10px] ${stale ? "text-amber-400" : "text-muted-foreground/60"}`}>
+            <span className="flex items-center gap-1">
+              {stale && <AlertTriangle className="w-3 h-3" />}
+              Atualizado {updatedLabel}{stale ? " (desatualizado)" : ""}
+            </span>
+            {sourceLabel && <span className="font-mono">{sourceLabel}</span>}
+          </div>
         )}
       </CardContent>
     </Card>

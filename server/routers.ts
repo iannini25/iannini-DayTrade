@@ -320,39 +320,90 @@ export const appRouter = router({
         }
       }),
 
-    // Buscar múltiplos índices de uma vez: Ibovespa, IFIX, SMLL
+    // Buscar múltiplos índices de uma vez.
+    // USD/BRL e SMLL usam fontes primárias (AwesomeAPI + B3 SMAL11) para evitar
+    // o rate-limit intermitente do Yahoo Finance. IBOV/IFIX/T10Y continuam no Yahoo.
     getIndices: publicProcedure.query(async () => {
-      const symbols = [
+      const { getUsdBrlAwesome, getSmallCapB3 } = await import("./marketApis");
+
+      // Yahoo: IBOV, IFIX, T10Y
+      const yahooSymbols = [
         { symbol: "^BVSP", name: "Ibovespa", shortName: "IBOV" },
         { symbol: "IFIX.SA", name: "IFIX", shortName: "IFIX" },
-        { symbol: "SMLL11.SA", name: "Small Caps", shortName: "SMLL" },
-        { symbol: "USDBRL=X", name: "Dólar", shortName: "USD/BRL" },
         { symbol: "^TNX", name: "Juros EUA 10Y", shortName: "T10Y" },
       ];
 
-      const results = await Promise.allSettled(
-        symbols.map(async (s) => {
-          // 1m/1d traz o regularMarketPrice intraday (não o fechamento de ontem)
-          const result = await getStockChart({ symbol: s.symbol, interval: "1m", range: "1d" });
-          const extracted = extractQuoteMeta(result);
-          return {
-            ...s,
-            price: extracted?.price ?? 0,
-            change: extracted?.change ?? 0,
-            changePct: extracted?.changePct ?? 0,
-            high: extracted?.high ?? 0,
-            low: extracted?.low ?? 0,
-            volume: extracted?.volume ?? 0,
-            prevClose: extracted?.prevClose ?? 0,
-          };
-        })
-      );
+      const [yahooResults, usdResult, smllResult] = await Promise.all([
+        Promise.allSettled(
+          yahooSymbols.map(async (s) => {
+            const result = await getStockChart({ symbol: s.symbol, interval: "1m", range: "1d" });
+            const extracted = extractQuoteMeta(result);
+            return {
+              ...s,
+              price: extracted?.price ?? 0,
+              change: extracted?.change ?? 0,
+              changePct: extracted?.changePct ?? 0,
+              high: extracted?.high ?? 0,
+              low: extracted?.low ?? 0,
+              volume: extracted?.volume ?? 0,
+              prevClose: extracted?.prevClose ?? 0,
+              marketTime: extracted?.marketTime ?? 0,
+              source: "yahoo" as const,
+            };
+          })
+        ),
+        getUsdBrlAwesome().catch(() => null),
+        getSmallCapB3().catch(() => null),
+      ]);
 
-      return symbols.map((s, i) => {
-        const r = results[i];
-        if (r?.status === "fulfilled") return r.value;
-        return { ...s, price: 0, change: 0, changePct: 0, high: 0, low: 0, volume: 0, prevClose: 0, error: true };
+      const yahooByShort: Record<string, any> = {};
+      yahooSymbols.forEach((s, i) => {
+        const r = yahooResults[i];
+        yahooByShort[s.shortName] = r?.status === "fulfilled"
+          ? r.value
+          : { ...s, price: 0, change: 0, changePct: 0, high: 0, low: 0, volume: 0, prevClose: 0, marketTime: 0, source: "yahoo" as const, error: true };
       });
+
+      const usdItem = {
+        symbol: "USDBRL=X" as const,
+        name: "Dólar",
+        shortName: "USD/BRL",
+        price: usdResult?.price ?? 0,
+        change: usdResult?.change ?? 0,
+        changePct: usdResult?.changePct ?? 0,
+        high: usdResult?.high ?? 0,
+        low: usdResult?.low ?? 0,
+        volume: 0,
+        prevClose: usdResult?.prevClose ?? 0,
+        marketTime: usdResult?.marketTime ?? 0,
+        source: (usdResult ? "awesomeapi" : "unavailable") as
+          | "yahoo" | "awesomeapi" | "b3-smal11" | "unavailable",
+      };
+
+      const smllItem = {
+        symbol: "SMLL.SA" as const,
+        name: "Small Caps",
+        shortName: "SMLL",
+        price: smllResult?.price ?? 0,
+        change: smllResult?.change ?? 0,
+        changePct: smllResult?.changePct ?? 0,
+        high: smllResult?.high ?? 0,
+        low: smllResult?.low ?? 0,
+        volume: 0,
+        prevClose: smllResult?.prevClose ?? 0,
+        marketTime: smllResult?.marketTime ?? 0,
+        source: (smllResult ? "b3-smal11" : "unavailable") as
+          | "yahoo" | "awesomeapi" | "b3-smal11" | "unavailable",
+      };
+
+      // Ordem visual da UI: IBOV, IFIX, SMLL, USD/BRL, T10Y
+      return [
+        yahooByShort["IBOV"],
+        yahooByShort["IFIX"],
+        smllItem,
+        usdItem,
+        yahooByShort["T10Y"],
+      ];
     }),
 
     // Notícias do mercado brasileiro via RSS do Google News (cache 10min)
